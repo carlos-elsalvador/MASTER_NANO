@@ -1,0 +1,117 @@
+//////////////////////////////////////////////////////////////////////////////////
+// Company: 
+// Engineer: 
+// 
+// Create Date: 10/10/2024 03:23:21 PM
+// Design Name: 
+// Module Name: riscv_core
+// Project Name: 
+// Target Devices: 
+// Tool Versions: 
+// Description: 
+// 
+// Dependencies: 
+// 
+// Revision:
+// Revision 0.01 - File Created
+// Additional Comments:
+// 
+//////////////////////////////////////////////////////////////////////////////////
+
+
+module riscv_core(clk,rstn,pc,inst,wra,wr,wrd,dat);
+
+
+parameter w=32,d=1024,r=32;
+localparam o=4;
+localparam a=$clog2(d);
+parameter from="rom.txt";
+parameter fram="ram.txt";
+parameter fregs="regs.txt";
+
+input clk,rstn;
+output logic [w-1:0] pc = 0;
+output wr;
+output [w-1:0]wra,wrd;
+output [w-1:0] inst;
+input [w-1:0] dat;
+
+logic branch, mem_read, mem_to_reg, mem_write, alu_src, reg_write, branchJALR; //mem_read is not used
+logic [1:0] aluop;
+logic aluz; logic [3:0] alu_cont_input; //alu zero result and alu_op input
+logic [w-1:0] imm1; //immediate from ImmGen
+logic [w-1:0] rin; //data to write into registers
+logic [w-1:0] rd1;
+logic [w-1:0] rd2; //data read from registers
+logic [w-1:0] alu_r; //alu result
+
+assign wra = alu_r;
+assign wrd = rd2;
+assign wr = mem_write;
+
+
+
+
+
+always @(posedge clk, negedge rstn) 
+	if (~rstn) pc <= {w{1'b0}};
+	else pc <= (branchJALR)? alu_r : (aluz&branch) ? pc+imm1:pc+4;
+
+rom #(.w(w),.d(d),.file(from)) inst_mem 
+(
+	.rdaddr(pc[(a-1)+2:2]), // 4 bytes aligned
+	.rddata(inst)
+);
+
+control control(
+    .instruction(inst[6:0]),
+    .branch     (branch),
+    .mem_read   (mem_read),
+    .mem_to_reg (mem_to_reg),
+    .alu_op     (aluop),
+    .mem_write  (mem_write),
+    .alu_src    (alu_src),
+    .reg_write  (reg_write),
+    .branchJALR (branchJALR)
+    );
+
+regs #(.w(r),.file(fregs)) regs 
+(
+	.clk(clk),
+	.rstn(rstn),
+	.wren(reg_write),
+	.wraddr(inst[11:7]),
+	.rdaddr1(inst[19:15]),
+	.rdaddr2(inst[24:20]),
+	.wrdata(rin),
+	.rddata1(rd1),
+	.rddata2(rd2)
+);
+
+imm #(.w(w)) imm
+(
+	.inst(inst),
+	.imm(imm1),
+	.i()
+);
+
+logic [w-1:0] alu_src2;
+assign alu_src2 = alu_src ? imm1:rd2;
+alu_control alu_control (
+    .funct3(inst[14:12]),
+    .funct7(inst[31:25]),
+    .aluop(aluop),
+    .alu_control_output(alu_cont_input)
+);
+
+ph_alu #(.w(w),.o(o)) alu
+(
+	.a(rd1),
+	.b(alu_src2),
+	.op(alu_cont_input),
+	.result(alu_r),
+	.zero(aluz)
+);
+assign rin = (branchJALR)? pc+4 : (mem_to_reg)? dat:alu_r;
+
+endmodule
